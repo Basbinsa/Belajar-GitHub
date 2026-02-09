@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EcoScan | Deteksi Sampah</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --organik: #10b981;
+            --anorganik: #3b82f6;
+            --bg: #f0fdf4;
+            --text: #064e3b;
+            --card: #ffffff;
+        }
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: var(--bg);
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            background: var(--card);
+            max-width: 450px;
+            width: 100%;
+            padding: 2rem;
+            border-radius: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.05);
+            text-align: center;
+        }
+
+        h1 { color: #065f46; margin-bottom: 5px; }
+        p.subtitle { color: #6b7280; font-size: 0.85rem; margin-bottom: 20px; }
+
+        /* Area Tampilan (Kamera / Gambar) */
+        #media-view {
+            width: 100%;
+            height: 300px;
+            background: #f8fafc;
+            border-radius: 20px;
+            overflow: hidden;
+            border: 3px dashed #cbd5e1;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+
+        #media-view canvas, #media-view img {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: cover;
+        }
+
+        /* Tombol */
+        .btn-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            padding: 12px;
+            border: none;
+            border-radius: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.3s;
+            font-size: 0.8rem;
+        }
+
+        .btn-webcam { background: #059669; color: white; }
+        .btn-upload { background: #e2e8f0; color: #475569; }
+
+        /* Kotak Hasil */
+        .result-item {
+            display: flex;
+            align-items: center;
+            background: #f9fafb;
+            padding: 12px 15px;
+            border-radius: 15px;
+            margin-bottom: 10px;
+            border: 1px solid #f1f5f9;
+        }
+
+        .bar-container {
+            flex: 1;
+            height: 10px;
+            background: #e5e7eb;
+            border-radius: 5px;
+            margin: 0 10px;
+            overflow: hidden;
+        }
+
+        .bar-fill {
+            height: 100%;
+            width: 0%;
+            transition: width 0.5s ease;
+        }
+
+        .label-text { font-weight: 600; font-size: 0.85rem; min-width: 80px; text-align: left; }
+        .percent-text { font-weight: 600; font-size: 0.85rem; min-width: 40px; }
+
+        input[type="file"] { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🌱 EcoScan</h1>
+    <p class="subtitle">Klasifikasi Sampah Organik & Anorganik</p>
+
+    <div id="media-view">
+        <div id="loading-text" style="color: #94a3b8;">Kamera / Gambar muncul di sini</div>
+    </div>
+
+    <div class="btn-group">
+        <button class="btn btn-webcam" onclick="startWebcam()">📷 Buka Kamera</button>
+        <label class="btn btn-upload">
+            📁 Pilih Gambar
+            <input type="file" accept="image/*" onchange="predictImage(this)">
+        </label>
+    </div>
+
+    <div id="label-container">
+        </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+
+<script>
+    const URL = "https://teachablemachine.withgoogle.com/models/9S8jLxybX/";
+    let model, webcam, labelContainer, maxPredictions;
+    let isWebcamActive = false;
+
+    // 1. Load Model saat halaman dibuka
+    async function loadModel() {
+        model = await tmImage.load(URL + "model.json", URL + "metadata.json");
+        maxPredictions = model.getTotalClasses();
+        createLabelElements();
+    }
+    loadModel();
+
+    // 2. Buat elemen label sekali saja di awal
+    function createLabelElements() {
+        labelContainer = document.getElementById("label-container");
+        labelContainer.innerHTML = "";
+        for (let i = 0; i < maxPredictions; i++) {
+            const div = document.createElement("div");
+            div.className = "result-item";
+            div.innerHTML = `
+                <span class="label-text">...</span>
+                <div class="bar-container"><div class="bar-fill"></div></div>
+                <span class="percent-text">0%</span>
+            `;
+            labelContainer.appendChild(div);
+        }
+    }
+
+    // 3. Logika Kamera
+    async function startWebcam() {
+        isWebcamActive = true;
+        document.getElementById("media-view").innerHTML = "Memuat Kamera...";
+        
+        webcam = new tmImage.Webcam(400, 400, true);
+        await webcam.setup();
+        await webcam.play();
+        
+        document.getElementById("media-view").innerHTML = "";
+        document.getElementById("media-view").appendChild(webcam.canvas);
+        window.requestAnimationFrame(webcamLoop);
+    }
+
+    async function webcamLoop() { 
+        if (isWebcamActive) {
+            webcam.update();
+            await runPrediction(webcam.canvas);
+            window.requestAnimationFrame(webcamLoop);
+        }
+    }
+
+    // 4. Logika Import Gambar (DIPERBAIKI)
+    async function predictImage(input) {
+        if (input.files && input.files[0]) {
+            // Matikan kamera jika sedang aktif
+            isWebcamActive = false; 
+            if(webcam) {
+                try { await webcam.stop(); } catch(e) {}
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const mediaView = document.getElementById("media-view");
+                
+                // BERSIHKAN media-view sebelum memasukkan gambar baru
+                mediaView.innerHTML = ""; 
+                
+                const img = new Image();
+                img.src = e.target.result;
+                
+                img.onload = async function() {
+                    // Masukkan gambar baru ke tampilan
+                    mediaView.appendChild(img);
+                    
+                    // Beri jeda sangat singkat agar browser selesai merender gambar
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    
+                    // Jalankan deteksi AI
+                    await runPrediction(img);
+                };
+            };
+            reader.readAsDataURL(input.files[0]);
+            
+            // RESET input file agar bisa memilih gambar yang sama atau baru berkali-kali
+            input.value = ""; 
+        }
+    }
+
+    // 5. Fungsi Prediksi (Tetap Sama namun lebih tangguh)
+    async function runPrediction(source) {
+        if (!model) return;
+        const prediction = await model.predict(source);
+        for (let i = 0; i < maxPredictions; i++) {
+            const prob = (prediction[i].probability * 100).toFixed(0);
+            const className = prediction[i].className;
+            const element = labelContainer.childNodes[i];
+
+            if (element) {
+                element.querySelector(".label-text").innerText = className;
+                element.querySelector(".percent-text").innerText = prob + "%";
+                const bar = element.querySelector(".bar-fill");
+                bar.style.width = prob + "%";
+                bar.style.background = className.toLowerCase().includes("anorganik") ? "var(--anorganik)" : "var(--organik)";
+            }
+        }
+    }
+</script>
+
+</body>
+</html>
